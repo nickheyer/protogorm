@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/nickheyer/protogorm"
 	"github.com/nickheyer/protogorm/internal/generator"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -20,13 +21,20 @@ import (
 
 func main() {
 	image := flag.String("image", "-", "buf descriptor image, - for stdin")
+	options := flag.String("options", "", "proto root receiving the annotation schema")
 	support := flag.String("support", "", "output root for per package gorm.gen.go files")
 	store := flag.String("store", "", "store crud output as path:package")
 	inject := flag.String("inject", "", "directory of pb.go files to tag")
 	flag.Parse()
 
+	if *options != "" {
+		writeFile(filepath.Join(*options, filepath.FromSlash(protogorm.OptionsPath)), protogorm.OptionsProto)
+	}
 	if *support == "" && *store == "" && *inject == "" {
-		fatal("nothing to do, pass -support, -store, or -inject")
+		if *options != "" {
+			return
+		}
+		fatal("nothing to do, pass -options, -support, -store, or -inject")
 	}
 
 	models, err := generator.Collect(readImage(*image))
