@@ -5,7 +5,7 @@ A buf plugin for turning your wire type into a gorm schema with free CRUD and pr
 protogorm reads `(protogorm.v1.model)` + `(protogorm.v1.db)` proto annotations and you get:
 
 1. **Tags** — gorm struct tags injected into the structs protoc-gen-go already made. The `.pb.go` struct *is* the table. While this is more-so a cool feature of gorm, proto derived gorm tags is a game changer.
-2. **Support** — `gorm.gen.go` beside your generated package: `TableName`, timestamp hooks, `Redact`, `AllModels` for automigrate, and a serializer that stores `google.protobuf.Timestamp` as a datetime column.
+2. **Support** — `gorm.gen.go` beside your generated package: `TableName`, timestamp hooks, `Redact` (returns a clone with secret fields cleared, never mutates the row you loaded), `AllModels` for automigrate, and a serializer that stores `google.protobuf.Timestamp` as a datetime column.
 3. **Store** — `store.gen.go` of typed CRUD methods (plus any annotated queries) on your `Store` type, in whatever package that lives.
 
 ## Annotate
@@ -59,6 +59,27 @@ Support and store generation also work as a plain protoc plugin for setups that 
 ```
 
 Injection still runs after, via `protogorm -inject`.
+
+## Runtime scrubbing
+
+`protogorm.Scrub(msg)` walks any proto message tree and clears every populated
+`redact: true` field, returning how many it caught. Wire it as an interceptor
+backstop so a handler that forgets `Redact()` still cannot leak a secret:
+
+```go
+if n := protogorm.Scrub(resp.Any().(proto.Message)); n > 0 {
+    log.Error("redact backstop caught %d secret fields on %s", n, procedure)
+}
+```
+
+## Testing
+
+Generator output is locked by golden files under `internal/generator/testdata`.
+After changing the generator, inspect the diff and refresh with:
+
+```sh
+go test ./internal/generator -run TestGolden -update
+```
 
 ## Vendoring the options
 

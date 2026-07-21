@@ -192,23 +192,33 @@ func fieldOpts(fd protoreflect.FieldDescriptor) *protogormv1.Field {
 	return proto.GetExtension(opts, protogormv1.E_Db).(*protogormv1.Field)
 }
 
+// Mirrors protoc-gen-go camel casing so injected names always match
 func goCamel(s string) string {
-	var b strings.Builder
-	up := true
-	for _, r := range s {
-		if r == '_' {
-			up = true
-			continue
-		}
-		if up {
-			if r >= 'a' && r <= 'z' {
-				r -= 'a' - 'A'
+	var b []byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '_' && i == 0:
+			b = append(b, 'X')
+		case c == '_' && i+1 < len(s) && isLower(s[i+1]):
+			// Dropped before a lowercase letter
+		case c >= '0' && c <= '9':
+			b = append(b, c)
+		default:
+			if isLower(c) {
+				c -= 'a' - 'A'
 			}
-			up = false
+			b = append(b, c)
+			for ; i+1 < len(s) && isLower(s[i+1]); i++ {
+				b = append(b, s[i+1])
+			}
 		}
-		b.WriteRune(r)
 	}
-	return b.String()
+	return string(b)
+}
+
+func isLower(c byte) bool {
+	return c >= 'a' && c <= 'z'
 }
 
 // Lower spaced words from a camel name

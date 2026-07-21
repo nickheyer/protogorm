@@ -12,11 +12,7 @@ import (
 
 	"github.com/nickheyer/protogorm"
 	"github.com/nickheyer/protogorm/internal/generator"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/reflect/protoregistry"
-	"google.golang.org/protobuf/types/descriptorpb"
 )
 
 func main() {
@@ -97,17 +93,11 @@ func readImage(path string) iter.Seq[protoreflect.FileDescriptor] {
 	if err != nil {
 		fatal("read image: %v", err)
 	}
-	var fds descriptorpb.FileDescriptorSet
-	if err := (proto.UnmarshalOptions{Resolver: protoregistry.GlobalTypes}).Unmarshal(data, &fds); err != nil {
-		fatal("unmarshal image: %v", err)
-	}
-	files, err := protodesc.NewFiles(&fds)
+	files, err := generator.LoadImage(data)
 	if err != nil {
-		fatal("build files: %v", err)
+		fatal("%v", err)
 	}
-	return func(yield func(protoreflect.FileDescriptor) bool) {
-		files.RangeFiles(yield)
-	}
+	return files
 }
 
 func writeFile(path string, data []byte) {

@@ -1,0 +1,131 @@
+syntax = "proto3";
+
+// Kitchen sink schema exercising every generator feature
+package protogormtest.v1;
+
+import "google/protobuf/timestamp.proto";
+import "protogorm/v1/options.proto";
+
+option go_package = "example.test/gen/test/v1;testv1";
+
+enum Genre {
+  GENRE_UNSPECIFIED = 0;
+  GENRE_SCIFI = 1;
+  GENRE_MYSTERY = 2;
+}
+
+// Plain nested payload stored as a json column
+message Meta {
+  string publisher = 1;
+  int32 edition = 2;
+}
+
+message Author {
+  option (protogorm.v1.model) = {
+    table: "authors"
+    order_by: "created_at DESC"
+    upsert: true
+    cascades: [
+      {model: "Book", fk: "author_id"},
+      {model: "Review", fk: "author_email", key: "email"}
+    ]
+    queries: [
+      {
+        name: "GetAuthorByEmail"
+        kind: QUERY_KIND_GET
+        where: "email = ?"
+        params: ["email string"]
+        not_found_nil: true
+      }
+    ]
+  };
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string email = 2 [(protogorm.v1.db) = {tag: "not null;uniqueIndex"}];
+  string name = 3;
+  string api_key = 4 [(protogorm.v1.db) = {redact: true}];
+  google.protobuf.Timestamp created_at = 5 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
+  google.protobuf.Timestamp updated_at = 6 [(protogorm.v1.db) = {tag: "autoUpdateTime"}];
+}
+
+message Book {
+  option (protogorm.v1.model) = {
+    table: "books"
+    order_by: "title ASC"
+    guards: [{model: "Review", fk: "book_id"}]
+    queries: [
+      {
+        name: "ListBooksByAuthor"
+        kind: QUERY_KIND_LIST
+        where: "author_id = ?"
+        params: ["authorID string"]
+        paginate: true
+        preload: ["Author"]
+        order_by: "published_at DESC"
+      },
+      {
+        name: "ListBooksByGenre"
+        kind: QUERY_KIND_LIST
+        where: "genre = ?"
+        params: ["genre Genre"]
+        limit: 25
+      },
+      {
+        name: "ListRecentBooks"
+        kind: QUERY_KIND_LIST
+        where: "datetime(published_at) > datetime(?)"
+        params: ["since time.Time"]
+        limit_arg: true
+      },
+      {
+        name: "CountBooksByAuthor"
+        kind: QUERY_KIND_COUNT
+        where: "author_id = ?"
+        params: ["authorID string"]
+      },
+      {
+        name: "BookExistsByTitle"
+        kind: QUERY_KIND_EXISTS
+        where: "title = ?"
+        params: ["title string"]
+      },
+      {
+        name: "PurgeBooksByAuthor"
+        kind: QUERY_KIND_DELETE
+        where: "author_id = ?"
+        params: ["authorID string"]
+        require_row: true
+      },
+      {
+        name: "RetitleBook"
+        kind: QUERY_KIND_UPDATE
+        set: "title = ?"
+        where: "id = ?"
+        params: ["title string", "id string"]
+        require_row: true
+      }
+    ]
+  };
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string title = 2 [(protogorm.v1.db) = {tag: "not null;index"}];
+  string author_id = 3 [(protogorm.v1.db) = {tag: "not null;index"}];
+  Author author = 4;
+  Genre genre = 5;
+  repeated string tags = 6;
+  map<string, string> attrs = 7;
+  Meta meta = 8;
+  repeated Meta revisions = 9;
+  string secret_note = 10 [(protogorm.v1.db) = {redact: true}];
+  string cache_hint = 11 [(protogorm.v1.db) = {skip: true}];
+  google.protobuf.Timestamp published_at = 12;
+}
+
+message Review {
+  option (protogorm.v1.model) = {
+    table: "reviews"
+    skip: ["update", "count"]
+  };
+  int64 id = 1 [(protogorm.v1.db) = {tag: "primaryKey;autoIncrement"}];
+  string book_id = 2 [(protogorm.v1.db) = {tag: "not null;index"}];
+  string author_email = 3 [(protogorm.v1.db) = {tag: "index"}];
+  string body = 4;
+}
