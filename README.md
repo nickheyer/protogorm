@@ -4,9 +4,9 @@ A buf plugin for turning your wire type into a gorm schema with free CRUD and pr
 
 protogorm reads `(protogorm.v1.model)` + `(protogorm.v1.db)` proto annotations and you get:
 
-1. **Tags** — gorm struct tags injected into the structs protoc-gen-go already made. The `.pb.go` struct *is* the table. While this is more-so a cool feature of gorm, proto derived gorm tags is a game changer.
-2. **Support** — `gorm.gen.go` beside your generated package: `TableName`, timestamp hooks, `Redact` (returns a clone with secret fields cleared, never mutates the row you loaded), `AllModels` for automigrate, and a serializer that stores `google.protobuf.Timestamp` as a datetime column.
-3. **Store** — `store.gen.go` of typed CRUD methods (plus any annotated queries) on your `Store` type, in whatever package that lives.
+1. **Tags** - gorm struct tags injected into the structs protoc-gen-go already made. The `.pb.go` struct *is* the table. While this is more-so a cool feature of gorm, proto derived gorm tags is a game changer.
+2. **Support** - `gorm.gen.go` beside your generated package: `TableName`, timestamp hooks, `Redact` (returns a clone with secret fields cleared, never mutates the row you loaded), `AllModels` for automigrate, and a serializer that stores `google.protobuf.Timestamp` as a datetime column.
+3. **Store** - `store.gen.go` of typed CRUD methods (plus any annotated queries) on your `Store` type, in whatever package that lives.
 
 ## Annotate
 
@@ -71,6 +71,18 @@ if n := protogorm.Scrub(resp.Any().(proto.Message)); n > 0 {
     log.Error("redact backstop caught %d secret fields on %s", n, procedure)
 }
 ```
+
+## Migrations
+
+`github.com/nickheyer/protogorm/migrate` moves live dbs between schemas with the gen models as the single source of truth. Basically atlas but better.
+
+The parts:
+
+- **Spec** - `migrate.SpecOf` parses models to snapshot w/ gorm's schema parser and each dialector's `DataTypeOf`.
+- **Fingerprint** - a normalized, column-order-independent hash of a schema as one dialect stores it (`SpecOfDB`).
+- **Chain** - a `Registry` holds a genesis snapshot plus ordered `Migration` steps.
+- **Engine** - on boot it proves where the database sits.
+- **Scaffold** - `migrate.Scaffold` diffs the last snapshot against live models and emits the next migration file pair.
 
 ## Testing
 
