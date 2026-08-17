@@ -1,4 +1,4 @@
-.PHONY: gen build test lint
+.PHONY: gen build test lint release
 
 BUF_IMAGE := bufbuild/buf:latest
 BUF_RUN := docker run --rm \
@@ -21,3 +21,6 @@ test:
 lint:
 	$(BUF_RUN) lint
 	go vet ./...
+
+release:
+	./scripts/pushReleaseTag.sh
