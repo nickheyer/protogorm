@@ -109,7 +109,7 @@ func (t *TableChange) sourceExpr(d Dialect, target string) string {
 }
 
 // Guards one change against silent data loss
-// NOTO/TODO: IMPLEMENT DIALECT IN THIS VALIDATION OTHERWISE REMOVE THE ARGS AFTER CONFIRMING ITS NOT NEEDED
+// Also proves every touched column types on this dialect
 func (t *TableChange) validate(d Dialect) error {
 	if t.Table == nil {
 		return fmt.Errorf("table change needs a target spec")
@@ -136,6 +136,11 @@ func (t *TableChange) validate(d Dialect) error {
 	for _, name := range t.Modifies {
 		if t.Table.Column(name) == nil {
 			return fmt.Errorf("table %s modifies unknown column %s", t.Table.Name, name)
+		}
+	}
+	for _, col := range t.Table.Columns {
+		if _, err := col.TypeFor(d.Name()); err != nil {
+			return fmt.Errorf("table %s: %w", t.Table.Name, err)
 		}
 	}
 	return nil

@@ -13,6 +13,62 @@ type postgresDialect struct{}
 
 func (postgresDialect) Name() string { return "postgres" }
 
+// Mirrors the gorm postgres driver type spellings
+// Unsigned widths bump one size up like the driver
+func (postgresDialect) TypeOf(c LogicalColumn) string {
+	switch c.Kind {
+	case TypeBool:
+		return "boolean"
+	case TypeInt32, TypeInt64, TypeUint32, TypeUint64, TypeEnum:
+		size := c.Size
+		if size == 0 {
+			switch c.Kind {
+			case TypeInt64, TypeUint64:
+				size = 64
+			default:
+				size = 32
+			}
+		}
+		if c.Kind == TypeUint32 || c.Kind == TypeUint64 {
+			size++
+		}
+		if c.AutoInc {
+			switch {
+			case size <= 16:
+				return "smallserial"
+			case size <= 32:
+				return "serial"
+			default:
+				return "bigserial"
+			}
+		}
+		switch {
+		case size <= 16:
+			return "smallint"
+		case size <= 32:
+			return "integer"
+		default:
+			return "bigint"
+		}
+	case TypeFloat, TypeDouble:
+		if c.Precision > 0 {
+			if c.Scale > 0 {
+				return fmt.Sprintf("numeric(%d, %d)", c.Precision, c.Scale)
+			}
+			return fmt.Sprintf("numeric(%d)", c.Precision)
+		}
+		return "decimal"
+	case TypeBytes:
+		return "bytea"
+	case TypeTime:
+		return "timestamptz"
+	}
+	if c.Size > 0 && c.Size <= 10485760 {
+		return fmt.Sprintf("varchar(%d)", c.Size)
+	}
+	return "text"
+}
+
 // Postgres ddl is fully transactional
 func (postgresDialect) TransactionalDDL() bool { return true }
 

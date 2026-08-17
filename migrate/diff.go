@@ -22,19 +22,20 @@ func (d Demand) String() string {
 }
 
 // Author answers resolving every destructive ambiguity
+// Renames and drops declared in the proto need no entry
 type Resolution struct {
 	// Source table keyed by target table name
-	TableRenames map[string]string
+	TableRenames map[string]string `json:"table_renames,omitempty"`
 	// Source column keyed by table then target column
-	Renames map[string]map[string]string
+	Renames map[string]map[string]string `json:"renames,omitempty"`
 	// Sql expressions keyed by table then target column
-	Copy map[string]map[string]string
+	Copy map[string]map[string]string `json:"copy,omitempty"`
 	// Tables the author confirms losing
-	DropTables []string
+	DropTables []string `json:"drop_tables,omitempty"`
 	// Columns the author confirms losing per table
-	DropColumns map[string][]string
+	DropColumns map[string][]string `json:"drop_columns,omitempty"`
 	// Changed columns the author confirms rewriting in place
-	ConfirmModify map[string][]string
+	ConfirmModify map[string][]string `json:"confirm_modify,omitempty"`
 }
 
 func (r *Resolution) renameFor(table, target string) (string, bool) {
@@ -73,6 +74,32 @@ func (r *Resolution) tableSource(target string) (string, bool) {
 	return from, ok
 }
 
+// Former name carried by the target and alive in from
+func wasSource(from, to *Spec, target *TableSpec, claimed map[string]bool) (string, bool) {
+	for _, was := range target.Was {
+		if claimed[was] || to.Table(was) != nil {
+			continue
+		}
+		if from.Table(was) != nil {
+			return was, true
+		}
+	}
+	return "", false
+}
+
+// Former column name alive in source and free in target
+func wasColumn(source, target *TableSpec, col *ColumnSpec, claimed map[string]bool) (string, bool) {
+	for _, was := range col.Was {
+		if claimed[was] || target.Column(was) != nil {
+			continue
+		}
+		if source.Column(was) != nil {
+			return was, true
+		}
+	}
+	return "", false
+}
+
 // Structural changes landing from onto to
 // Unresolved ambiguity comes back as demands, never ops
 func Diff(from, to *Spec, res *Resolution) ([]Op, []Demand, error) {
@@ -85,6 +112,10 @@ func Diff(from, to *Spec, res *Resolution) ([]Op, []Demand, error) {
 		sourceName := target.Name
 		if renamed, ok := res.tableSource(target.Name); ok {
 			sourceName = renamed
+		} else if from.Table(sourceName) == nil {
+			if was, ok := wasSource(from, to, target, claimed); ok {
+				sourceName = was
+			}
 		}
 		source = from.Table(sourceName)
 		if source != nil {
@@ -113,7 +144,7 @@ func Diff(from, to *Spec, res *Resolution) ([]Op, []Demand, error) {
 		demands = append(demands, Demand{
 			Table:  source.Name,
 			Kind:   "vanishing_table",
-			Detail: "confirm the drop or name its replacement table",
+			Detail: "confirm the drop or add a was name on its replacement",
 		})
 	}
 	return ops, demands, nil
@@ -145,6 +176,13 @@ func diffTable(source, target *TableSpec, renamed bool, res *Resolution) (*Table
 			change.Renames[col.Name] = from
 			continue
 		}
+		if source.Column(col.Name) == nil {
+			if was, ok := wasColumn(source, target, col, claimed); ok {
+				claimed[was] = true
+				change.Renames[col.Name] = was
+				continue
+			}
+		}
 		old := source.Column(col.Name)
 		if old == nil {
 			change.Adds = append(change.Adds, col.Name)
@@ -175,7 +213,7 @@ func diffTable(source, target *TableSpec, renamed bool, res *Resolution) (*Table
 		if claimed[old.Name] || target.Column(old.Name) != nil {
 			continue
 		}
-		if res.dropsColumn(target.Name, old.Name) {
+		if res.dropsColumn(target.Name, old.Name) || slices.Contains(target.Reserved, old.Name) {
 			change.Drops = append(change.Drops, old.Name)
 			continue
 		}
@@ -183,7 +221,7 @@ func diffTable(source, target *TableSpec, renamed bool, res *Resolution) (*Table
 			Table:  target.Name,
 			Column: old.Name,
 			Kind:   "vanishing_column",
-			Detail: "confirm the drop or name its replacement column",
+			Detail: "confirm the drop, reserve the field name, or name its replacement",
 		})
 	}
 
@@ -194,7 +232,7 @@ func diffTable(source, target *TableSpec, renamed bool, res *Resolution) (*Table
 			change.AddIndexes = append(change.AddIndexes, idx.Name)
 			continue
 		}
-		if old.Unique != idx.Unique || !slices.Equal(old.Columns, idx.Columns) {
+		if old.Unique != idx.Unique || !slices.Equal(old.Columns, idx.Columns) || old.Where != idx.Where {
 			change.DropIndexes = append(change.DropIndexes, idx.Name)
 			change.AddIndexes = append(change.AddIndexes, idx.Name)
 		}

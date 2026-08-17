@@ -25,8 +25,9 @@ type Author struct {
 	Email         string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty" gorm:"column:email;not null;uniqueIndex"`
 	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty" gorm:"column:name"`
 	ApiKey        string                 `protobuf:"bytes,4,opt,name=api_key,json=apiKey,proto3" json:"-" gorm:"column:api_key"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty" gorm:"column:created_at;type:datetime;serializer:tspb;autoCreateTime"`
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty" gorm:"column:updated_at;type:datetime;serializer:tspb;autoUpdateTime"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty" gorm:"column:created_at;serializer:tspb;autoCreateTime"`
+	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty" gorm:"column:updated_at;serializer:tspb;autoUpdateTime"`
+	Handle        string                 `protobuf:"bytes,7,opt,name=handle,proto3" json:"handle,omitempty" gorm:"column:handle;uniqueIndex:idx_authors_handle,where:handle != ''"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -44,7 +45,7 @@ type Book struct {
 	Revisions     []*Meta                `protobuf:"bytes,9,rep,name=revisions,proto3" json:"revisions,omitempty" gorm:"column:revisions;serializer:json"`
 	SecretNote    string                 `protobuf:"bytes,10,opt,name=secret_note,json=secretNote,proto3" json:"-" gorm:"column:secret_note"`
 	CacheHint     string                 `protobuf:"bytes,11,opt,name=cache_hint,json=cacheHint,proto3" json:"cache_hint,omitempty" gorm:"-"`
-	PublishedAt   *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=published_at,json=publishedAt,proto3" json:"published_at,omitempty" gorm:"column:published_at;type:datetime;serializer:tspb"`
+	PublishedAt   *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=published_at,json=publishedAt,proto3" json:"published_at,omitempty" gorm:"column:published_at;serializer:tspb"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -55,6 +56,7 @@ type Review struct {
 	BookId        string                 `protobuf:"bytes,2,opt,name=book_id,json=bookId,proto3" json:"book_id,omitempty" gorm:"column:book_id;not null;index"`
 	AuthorEmail   string                 `protobuf:"bytes,3,opt,name=author_email,json=authorEmail,proto3" json:"author_email,omitempty" gorm:"column:author_email;index"`
 	Body          string                 `protobuf:"bytes,4,opt,name=body,proto3" json:"body,omitempty" gorm:"column:body"`
+	Stars         int64                  `protobuf:"varint,5,opt,name=stars,proto3" json:"stars,omitempty" gorm:"column:stars;not null;default:0"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

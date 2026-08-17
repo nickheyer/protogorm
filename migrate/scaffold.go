@@ -15,9 +15,11 @@ type ScaffoldRequest struct {
 	Package string
 	// Short migration name like add_lobby_flags
 	Name string
-	// Existing chain the new migration extends
-	Registry *Registry
-	// Fresh spec from the live generated models
+	// Position the new migration takes, starting at one
+	Ordinal int
+	// Snapshot the chain currently ends on
+	From *Spec
+	// Fresh spec from the generated models
 	Head *Spec
 	// Author answers for destructive ambiguity
 	Resolution *Resolution
@@ -28,8 +30,8 @@ var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 // Builds the next migration file pair from a diff
 // Demands come back instead of files until resolved
 func Scaffold(req ScaffoldRequest) (map[string][]byte, []Demand, error) {
-	if req.Registry == nil || req.Head == nil {
-		return nil, nil, fmt.Errorf("scaffold needs a registry and a head spec")
+	if req.From == nil || req.Head == nil {
+		return nil, nil, fmt.Errorf("scaffold needs a from snapshot and a head spec")
 	}
 	if !namePattern.MatchString(req.Name) {
 		return nil, nil, fmt.Errorf("migration name %q must be lower snake case", req.Name)
@@ -37,16 +39,11 @@ func Scaffold(req ScaffoldRequest) (map[string][]byte, []Demand, error) {
 	if req.Package == "" {
 		return nil, nil, fmt.Errorf("scaffold needs the migrations package name")
 	}
-
-	from := req.Registry.Genesis
-	if n := req.Registry.Len(); n > 0 {
-		from = req.Registry.At(n).Target
-	}
-	if from == nil {
-		return nil, nil, fmt.Errorf("chain has no genesis snapshot to diff from")
+	if req.Ordinal < 1 {
+		return nil, nil, fmt.Errorf("scaffold ordinal %d must start at one", req.Ordinal)
 	}
 
-	ops, demands, err := Diff(from, req.Head, req.Resolution)
+	ops, demands, err := Diff(req.From, req.Head, req.Resolution)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -57,15 +54,14 @@ func Scaffold(req ScaffoldRequest) (map[string][]byte, []Demand, error) {
 		return nil, nil, fmt.Errorf("schema is unchanged, nothing to scaffold")
 	}
 
-	ordinal := req.Registry.Len() + 1
-	base := fmt.Sprintf("%04d_%s", ordinal, req.Name)
+	base := fmt.Sprintf("%04d_%s", req.Ordinal, req.Name)
 
 	snapshot, err := req.Head.MarshalCanonical()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	source, err := renderMigrationFile(req.Package, base, ordinal, req.Name, ops)
+	source, err := renderMigrationFile(req.Package, base, req.Ordinal, req.Name, ops)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -74,6 +70,50 @@ func Scaffold(req ScaffoldRequest) (map[string][]byte, []Demand, error) {
 		base + ".go":            source,
 		base + ".snapshot.json": snapshot,
 	}, nil, nil
+}
+
+// Renders the migrations package scaffolding file
+// Emitted once when a migrations directory starts empty
+func RenderRegistryBootstrap(pkg string) ([]byte, error) {
+	src := fmt.Sprintf(`// Migration chain assembled from committed snapshots
+package %s
+
+import (
+	"embed"
+
+	"github.com/nickheyer/protogorm/migrate"
+)
+
+//go:embed *.snapshot.json
+var snapshots embed.FS
+
+// Chain every migration file registers into
+var Registry = &migrate.Registry{Genesis: genesis()}
+
+// Desired schema this build ships
+func Head() *migrate.Spec {
+	return mustSnapshot("head.snapshot.json")
+}
+
+// Position zero spec when a genesis file exists
+func genesis() *migrate.Spec {
+	data, err := snapshots.ReadFile("genesis.snapshot.json")
+	if err != nil {
+		return nil
+	}
+	return migrate.MustParseSpec(data)
+}
+
+// Reads one committed snapshot or panics
+func mustSnapshot(name string) *migrate.Spec {
+	data, err := snapshots.ReadFile(name)
+	if err != nil {
+		panic(err)
+	}
+	return migrate.MustParseSpec(data)
+}
+`, pkg)
+	return format.Source([]byte(src))
 }
 
 // Renders the registration source for one migration

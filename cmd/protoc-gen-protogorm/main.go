@@ -8,6 +8,7 @@ import (
 	"path"
 
 	"github.com/nickheyer/protogorm/internal/generator"
+	"github.com/nickheyer/protogorm/migrate"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/pluginpb"
@@ -16,6 +17,7 @@ import (
 func main() {
 	var flags flag.FlagSet
 	store := flags.String("store", "", "emit store crud with this go package name")
+	spec := flags.String("spec", "", "emit the head schema snapshot at this name")
 	protogen.Options{ParamFunc: flags.Set}.Run(func(gen *protogen.Plugin) error {
 		gen.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL)
 
@@ -25,6 +27,20 @@ func main() {
 		}
 		if len(models) == 0 {
 			return fmt.Errorf("no messages with (protogorm.v1.model)")
+		}
+
+		if *spec != "" {
+			head, err := generator.BuildSpec(models, migrate.Dialects())
+			if err != nil {
+				return err
+			}
+			data, err := head.MarshalCanonical()
+			if err != nil {
+				return err
+			}
+			g := gen.NewGeneratedFile(*spec, "")
+			_, err = g.Write(data)
+			return err
 		}
 
 		if *store != "" {

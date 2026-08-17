@@ -64,6 +64,39 @@ func TestFingerprintSeesRealChanges(t *testing.T) {
 	}
 }
 
+func TestFingerprintIgnoresHistory(t *testing.T) {
+	spec := v2Spec(t)
+	d := sqliteDialect(t)
+	want, err := spec.Fingerprint(d)
+	if err != nil {
+		t.Fatalf("fingerprint: %v", err)
+	}
+
+	// Stripped history must hash identically
+	data, err := spec.MarshalCanonical()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	bare, err := migrate.ParseSpec(data)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	for _, table := range bare.Tables {
+		table.Was = nil
+		table.Reserved = nil
+		for _, col := range table.Columns {
+			col.Was = nil
+		}
+	}
+	got, err := bare.Fingerprint(d)
+	if err != nil {
+		t.Fatalf("fingerprint: %v", err)
+	}
+	if got != want {
+		t.Fatal("history fields changed the fingerprint")
+	}
+}
+
 func TestSpecRoundTripsThroughJSON(t *testing.T) {
 	spec := v2Spec(t)
 	data, err := spec.MarshalCanonical()
@@ -79,6 +112,100 @@ func TestSpecRoundTripsThroughJSON(t *testing.T) {
 	b, _ := back.Fingerprint(d)
 	if a != b {
 		t.Fatal("snapshot round trip changed the fingerprint")
+	}
+
+	// History rides the snapshot file too
+	world := back.Table("worlds")
+	if world == nil || world.Column("world_seed") == nil {
+		t.Fatal("worlds table lost in round trip")
+	}
+	if len(world.Column("world_seed").Was) != 1 || world.Column("world_seed").Was[0] != "seed" {
+		t.Fatalf("was history lost, got %v", world.Column("world_seed").Was)
+	}
+}
+
+func TestDiffResolvesRenamesFromHistory(t *testing.T) {
+	ops, demands, err := migrate.Diff(v1Spec(t), v2Spec(t), nil)
+	if err != nil {
+		t.Fatalf("diff: %v", err)
+	}
+	if len(demands) != 0 {
+		t.Fatalf("history left demands %v", demands)
+	}
+	found := false
+	for _, op := range ops {
+		change, ok := op.(migrate.TableChange)
+		if !ok || change.Table.Name != "worlds" {
+			continue
+		}
+		if change.Renames["world_seed"] != "seed" {
+			t.Fatalf("rename not resolved, got %v", change.Renames)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatal("worlds change missing from ops")
+	}
+}
+
+func TestDiffResolvesDropsFromReserved(t *testing.T) {
+	from := &migrate.Spec{Tables: []*migrate.TableSpec{{
+		Name: "players",
+		Columns: []*migrate.ColumnSpec{
+			{Name: "id", Types: map[string]string{"sqlite": "text"}, PK: true, NotNull: true},
+			{Name: "legacy_flags", Types: map[string]string{"sqlite": "text"}},
+		},
+	}}}
+	to := &migrate.Spec{Tables: []*migrate.TableSpec{{
+		Name:     "players",
+		Reserved: []string{"legacy_flags"},
+		Columns: []*migrate.ColumnSpec{
+			{Name: "id", Types: map[string]string{"sqlite": "text"}, PK: true, NotNull: true},
+		},
+	}}}
+	ops, demands, err := migrate.Diff(from, to, nil)
+	if err != nil {
+		t.Fatalf("diff: %v", err)
+	}
+	if len(demands) != 0 {
+		t.Fatalf("reserved name left demands %v", demands)
+	}
+	if len(ops) != 1 {
+		t.Fatalf("want one change, got %v", ops)
+	}
+	change, ok := ops[0].(migrate.TableChange)
+	if !ok || len(change.Drops) != 1 || change.Drops[0] != "legacy_flags" {
+		t.Fatalf("drop not resolved, got %+v", ops[0])
+	}
+}
+
+func TestDiffResolvesTableRenameFromHistory(t *testing.T) {
+	from := &migrate.Spec{Tables: []*migrate.TableSpec{{
+		Name: "tomes",
+		Columns: []*migrate.ColumnSpec{
+			{Name: "id", Types: map[string]string{"sqlite": "text"}, PK: true, NotNull: true},
+		},
+	}}}
+	to := &migrate.Spec{Tables: []*migrate.TableSpec{{
+		Name: "books",
+		Was:  []string{"tomes"},
+		Columns: []*migrate.ColumnSpec{
+			{Name: "id", Types: map[string]string{"sqlite": "text"}, PK: true, NotNull: true},
+		},
+	}}}
+	ops, demands, err := migrate.Diff(from, to, nil)
+	if err != nil {
+		t.Fatalf("diff: %v", err)
+	}
+	if len(demands) != 0 {
+		t.Fatalf("table history left demands %v", demands)
+	}
+	if len(ops) != 1 {
+		t.Fatalf("want one change, got %v", ops)
+	}
+	change, ok := ops[0].(migrate.TableChange)
+	if !ok || change.From != "tomes" || change.Table.Name != "books" {
+		t.Fatalf("table rename not resolved, got %+v", ops[0])
 	}
 }
 
@@ -127,17 +254,12 @@ func TestDiffEmptyOnIdenticalSpecs(t *testing.T) {
 }
 
 func TestScaffoldRendersCompilableSource(t *testing.T) {
-	reg := &migrate.Registry{Genesis: v1Spec(t)}
 	files, demands, err := migrate.Scaffold(migrate.ScaffoldRequest{
-		Package:  "migrations",
-		Name:     "second_release",
-		Registry: reg,
-		Head:     v2Spec(t),
-		Resolution: &migrate.Resolution{
-			Renames: map[string]map[string]string{
-				"worlds": {"world_seed": "seed"},
-			},
-		},
+		Package: "migrations",
+		Name:    "second_release",
+		Ordinal: 1,
+		From:    v1Spec(t),
+		Head:    v2Spec(t),
 	})
 	if err != nil {
 		t.Fatalf("scaffold: %v", err)
@@ -169,12 +291,12 @@ func TestScaffoldRendersCompilableSource(t *testing.T) {
 }
 
 func TestScaffoldRefusesUnresolvedDemands(t *testing.T) {
-	reg := &migrate.Registry{Genesis: v2Spec(t)}
 	files, demands, err := migrate.Scaffold(migrate.ScaffoldRequest{
-		Package:  "migrations",
-		Name:     "shrink",
-		Registry: reg,
-		Head:     v1Spec(t),
+		Package: "migrations",
+		Name:    "shrink",
+		Ordinal: 1,
+		From:    v2Spec(t),
+		Head:    v1Spec(t),
 	})
 	if err != nil {
 		t.Fatalf("scaffold: %v", err)
@@ -184,6 +306,24 @@ func TestScaffoldRefusesUnresolvedDemands(t *testing.T) {
 	}
 	if len(demands) == 0 {
 		t.Fatal("unresolved scaffold raised no demands")
+	}
+}
+
+func TestRegistryBootstrapRenders(t *testing.T) {
+	data, err := migrate.RenderRegistryBootstrap("migrations")
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	for _, want := range []string{
+		"package migrations",
+		"//go:embed *.snapshot.json",
+		`mustSnapshot("head.snapshot.json")`,
+		`snapshots.ReadFile("genesis.snapshot.json")`,
+		"var Registry = &migrate.Registry{Genesis: genesis()}",
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("bootstrap missing %q in\n%s", want, data)
+		}
 	}
 }
 

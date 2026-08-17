@@ -8,10 +8,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
-
-	"gorm.io/gorm"
-	"gorm.io/gorm/schema"
 )
 
 // Whole desired schema for one model set
@@ -20,10 +16,15 @@ type Spec struct {
 }
 
 // One table with its columns and indexes
+// History fields never join the fingerprint
 type TableSpec struct {
 	Name    string        `json:"name"`
 	Columns []*ColumnSpec `json:"columns"`
 	Indexes []*IndexSpec  `json:"indexes,omitempty"`
+	// Former table names, newest first
+	Was []string `json:"was,omitempty"`
+	// Retired column names counting as confirmed drops
+	Reserved []string `json:"reserved,omitempty"`
 }
 
 // One column with per dialect storage types
@@ -36,87 +37,17 @@ type ColumnSpec struct {
 	PK      bool              `json:"pk,omitempty"`
 	AutoInc bool              `json:"auto_inc,omitempty"`
 	Unique  bool              `json:"unique,omitempty"`
+	// Former column names, newest first
+	Was []string `json:"was,omitempty"`
 }
 
 // One named index over table columns
+// Where stays out of fingerprints, engines hide it
 type IndexSpec struct {
 	Name    string   `json:"name"`
 	Columns []string `json:"columns"`
 	Unique  bool     `json:"unique,omitempty"`
-}
-
-// Inputs the desired schema derives from
-type SpecSource struct {
-	// Generated models, usually the AllModels slice
-	Models []any
-	// Every dialect the app can run on
-	Dialectors []gorm.Dialector
-	// Nil falls back to gorm defaults
-	Namer schema.Namer
-}
-
-// Builds the desired schema from parsed gorm models
-// Types come from each dialector so gorm stays the authority
-func SpecOf(src SpecSource) (*Spec, error) {
-	if len(src.Models) == 0 {
-		return nil, fmt.Errorf("spec needs at least one model")
-	}
-	if len(src.Dialectors) == 0 {
-		return nil, fmt.Errorf("spec needs at least one dialector")
-	}
-	namer := src.Namer
-	if namer == nil {
-		namer = schema.NamingStrategy{IdentifierMaxLength: 64}
-	}
-	cache := &sync.Map{}
-
-	spec := &Spec{}
-	seen := map[string]bool{}
-	for _, model := range src.Models {
-		parsed, err := schema.Parse(model, cache, namer)
-		if err != nil {
-			return nil, fmt.Errorf("parse model %T: %w", model, err)
-		}
-		if seen[parsed.Table] {
-			return nil, fmt.Errorf("table %s declared twice", parsed.Table)
-		}
-		seen[parsed.Table] = true
-
-		table := &TableSpec{Name: parsed.Table}
-		for _, field := range parsed.Fields {
-			if field.DBName == "" {
-				continue
-			}
-			col := &ColumnSpec{
-				Name:    field.DBName,
-				Types:   map[string]string{},
-				NotNull: field.NotNull || field.PrimaryKey,
-				PK:      field.PrimaryKey,
-				AutoInc: field.AutoIncrement,
-				Unique:  field.Unique,
-			}
-			if field.HasDefaultValue && field.DefaultValue != "" {
-				col.Default = field.DefaultValue
-			}
-			for _, d := range src.Dialectors {
-				col.Types[d.Name()] = d.DataTypeOf(field)
-			}
-			table.Columns = append(table.Columns, col)
-		}
-		for _, idx := range parsed.ParseIndexes() {
-			index := &IndexSpec{
-				Name:   idx.Name,
-				Unique: strings.EqualFold(idx.Class, "UNIQUE"),
-			}
-			for _, f := range idx.Fields {
-				index.Columns = append(index.Columns, f.DBName)
-			}
-			table.Indexes = append(table.Indexes, index)
-		}
-		spec.Tables = append(spec.Tables, table)
-	}
-	spec.sort()
-	return spec, nil
+	Where   string   `json:"where,omitempty"`
 }
 
 // Orders everything so serialization stays deterministic
@@ -192,13 +123,18 @@ func ParseSpec(data []byte) (*Spec, error) {
 func (s *Spec) clone() *Spec {
 	out := &Spec{}
 	for _, t := range s.Tables {
-		nt := &TableSpec{Name: t.Name}
+		nt := &TableSpec{
+			Name:     t.Name,
+			Was:      append([]string(nil), t.Was...),
+			Reserved: append([]string(nil), t.Reserved...),
+		}
 		for _, c := range t.Columns {
 			nc := *c
 			nc.Types = map[string]string{}
 			for k, v := range c.Types {
 				nc.Types[k] = v
 			}
+			nc.Was = append([]string(nil), c.Was...)
 			nt.Columns = append(nt.Columns, &nc)
 		}
 		for _, idx := range t.Indexes {

@@ -5,7 +5,7 @@ A buf plugin for turning your wire type into a gorm schema with free CRUD and pr
 protogorm reads `(protogorm.v1.model)` + `(protogorm.v1.db)` proto annotations and you get:
 
 1. **Tags** - gorm struct tags injected into the structs protoc-gen-go already made. The `.pb.go` struct *is* the table. While this is more-so a cool feature of gorm, proto derived gorm tags is a game changer.
-2. **Support** - `gorm.gen.go` beside your generated package: `TableName`, timestamp hooks, `Redact` (returns a clone with secret fields cleared, never mutates the row you loaded), `AllModels` for automigrate, and a serializer that stores `google.protobuf.Timestamp` as a datetime column.
+2. **Support** - `gorm.gen.go` beside your generated package: `TableName`, timestamp hooks, `Redact` (returns a clone with secret fields cleared, never mutates the row you loaded), `AllModels` in one slice, and a serializer that stores `google.protobuf.Timestamp` as a real time column.
 3. **Store** - `store.gen.go` of typed CRUD methods (plus any annotated queries) on your `Store` type, in whatever package that lives.
 
 ## Annotate
@@ -31,7 +31,17 @@ message User {
 }
 ```
 
-A single string pk named `id` gets a uuid filled in on create when empty. Fields typed as another model become relations. Maps, lists, and message fields serialize to json columns. Timestamps become datetime columns.
+A single string pk named `id` gets a uuid filled in on create when empty. Fields typed as another model become relations. Maps, lists, and message fields serialize to json columns. Timestamps get real time columns per dialect (`datetime` on sqlite, `timestamptz` on postgres).
+
+Schema history lives in the proto too: rename a column and list the old name in `was`, rename a table and put the old name in the model's `was`, delete a field and `reserve` its name. The migration differ reads all of it and stops asking you questions.
+
+```proto
+message User {
+  option (protogorm.v1.model) = {table: "users", was: ["accounts"]};
+  reserved "legacy_flags";
+  string display_name = 2 [(protogorm.v1.db) = {was: ["username"]}];
+}
+```
 
 ## Run
 
@@ -74,15 +84,28 @@ if n := protogorm.Scrub(resp.Any().(proto.Message)); n > 0 {
 
 ## Migrations
 
-`github.com/nickheyer/protogorm/migrate` moves live dbs between schemas with the gen models as the single source of truth. Basically atlas but better.
+`github.com/nickheyer/protogorm/migrate` moves live dbs between schemas with the protos as the single source of truth. Basically atlas but better.
 
 The parts:
 
-- **Spec** - `migrate.SpecOf` parses models to snapshot w/ gorm's schema parser and each dialector's `DataTypeOf`.
+- **Spec** - derived straight from the descriptors, no compiled structs needed. Every dialect's column spelling is rendered at gen time and committed as json, so the schema your build ships is a file you can read in review. A parity test locks the derivation against gorm's own schema parser so the two can never drift.
 - **Fingerprint** - a normalized, column-order-independent hash of a schema as one dialect stores it (`SpecOfDB`).
 - **Chain** - a `Registry` holds a genesis snapshot plus ordered `Migration` steps.
 - **Engine** - on boot it proves where the database sits.
-- **Scaffold** - `migrate.Scaffold` diffs the last snapshot against live models and emits the next migration file pair.
+- **Scaffold** - diffs the last committed snapshot against the head spec and emits the next migration file pair, bootstrapping the migrations package on first run. Renames come from `was`, drops from `reserved` names, and anything still ambiguous is refused with a demand list instead of guessed.
+
+The image-driven CLI does both:
+
+```sh
+buf build -o - | go run github.com/nickheyer/protogorm/cmd/protogorm \
+    -spec internal/db/migrations/head.snapshot.json
+
+buf build -o - | go run github.com/nickheyer/protogorm/cmd/protogorm \
+    -migrations internal/db/migrations:migrations \
+    -scaffold add_lobby_flags
+```
+
+Run `-spec` inside your normal gen step so the head snapshot always matches the protos. Run `-scaffold` when you change the schema; anything it cannot resolve from proto history it asks for through a `-resolve` json file. Fresh installs never replay the chain, the engine creates every table at head in one step and stamps the ledger.
 
 ## Testing
 

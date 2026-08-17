@@ -45,12 +45,14 @@ message Author {
   string api_key = 4 [(protogorm.v1.db) = {redact: true}];
   google.protobuf.Timestamp created_at = 5 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
   google.protobuf.Timestamp updated_at = 6 [(protogorm.v1.db) = {tag: "autoUpdateTime"}];
+  string handle = 7 [(protogorm.v1.db) = {tag: "uniqueIndex:idx_authors_handle,where:handle != ''"}];
 }
 
 message Book {
   option (protogorm.v1.model) = {
     table: "books"
     order_by: "title ASC"
+    was: ["tomes"]
     guards: [{model: "Review", fk: "book_id"}]
     queries: [
       {
@@ -105,8 +107,9 @@ message Book {
       }
     ]
   };
+  reserved "old_isbn";
   string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
-  string title = 2 [(protogorm.v1.db) = {tag: "not null;index"}];
+  string title = 2 [(protogorm.v1.db) = {tag: "not null;index", was: ["headline"]}];
   string author_id = 3 [(protogorm.v1.db) = {tag: "not null;index"}];
   Author author = 4;
   Genre genre = 5;
@@ -128,4 +131,5 @@ message Review {
   string book_id = 2 [(protogorm.v1.db) = {tag: "not null;index"}];
   string author_email = 3 [(protogorm.v1.db) = {tag: "index"}];
   string body = 4;
+  int64 stars = 5 [(protogorm.v1.db) = {tag: "not null;default:0"}];
 }

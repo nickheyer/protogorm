@@ -73,13 +73,14 @@ func computeTags(m *Model) map[string]fieldTags {
 }
 
 // Picks storage serializers from the field shape
+// Column types stay out, the migrate spec owns ddl
 func autoSerializer(fd protoreflect.FieldDescriptor) []string {
 	if fd.IsMap() || fd.IsList() {
 		return []string{"serializer:json"}
 	}
 	if fd.Kind() == protoreflect.MessageKind {
 		if fd.Message().FullName() == "google.protobuf.Timestamp" {
-			return []string{"type:datetime", "serializer:tspb"}
+			return []string{"serializer:tspb"}
 		}
 		return []string{"serializer:json"}
 	}

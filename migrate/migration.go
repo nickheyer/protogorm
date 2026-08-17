@@ -20,6 +20,29 @@ type ledgerRow struct {
 
 func (ledgerRow) TableName() string { return LedgerTable }
 
+// Ledger table shape rendered through one dialect
+func ledgerSpec(d Dialect) *TableSpec {
+	col := func(name string, kind LogicalType, notNull, pk bool) *ColumnSpec {
+		return &ColumnSpec{
+			Name:    name,
+			Types:   map[string]string{d.Name(): d.TypeOf(LogicalColumn{Kind: kind, PK: pk})},
+			NotNull: notNull || pk,
+			PK:      pk,
+		}
+	}
+	return &TableSpec{
+		Name: LedgerTable,
+		Columns: []*ColumnSpec{
+			col("ordinal", TypeInt64, true, true),
+			col("name", TypeText, true, false),
+			col("fingerprint", TypeText, true, false),
+			col("app_version", TypeText, false, false),
+			col("applied_at", TypeTime, true, false),
+			col("duration_ms", TypeInt64, true, false),
+		},
+	}
+}
+
 // One step moving the schema onto its target snapshot
 type Migration struct {
 	// Position in the chain starting at one

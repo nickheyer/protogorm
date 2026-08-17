@@ -7,54 +7,111 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"github.com/nickheyer/protogorm/internal/generator"
+	"github.com/nickheyer/protogorm/internal/testproto"
 	"github.com/nickheyer/protogorm/migrate"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
-// First release shape of the test app
-type playerV1 struct {
-	ID    string `gorm:"primaryKey;column:id"`
-	Name  string `gorm:"column:name;not null;uniqueIndex:idx_players_name"`
-	Coins int64  `gorm:"column:coins;not null;default:0"`
-	Admin bool   `gorm:"column:admin;not null;default:false"`
+// First release schema of the test app
+const appV1Proto = `
+syntax = "proto3";
+package apptest.v1;
+import "protogorm/v1/options.proto";
+option go_package = "example.test/gen/app/v1;appv1";
+
+message Player {
+  option (protogorm.v1.model) = {table: "players"};
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string name = 2 [(protogorm.v1.db) = {tag: "not null;uniqueIndex:idx_players_name"}];
+  int64 coins = 3 [(protogorm.v1.db) = {tag: "not null;default:0"}];
+  bool admin = 4 [(protogorm.v1.db) = {tag: "not null;default:false"}];
 }
 
-func (playerV1) TableName() string { return "players" }
+message World {
+  option (protogorm.v1.model) = {table: "worlds"};
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string name = 2 [(protogorm.v1.db) = {tag: "not null"}];
+  int64 seed = 3;
+}
+`
 
-type worldV1 struct {
-	ID   string `gorm:"primaryKey;column:id"`
-	Name string `gorm:"column:name;not null"`
-	Seed int64  `gorm:"column:seed"`
+// Second release adds, renames through was, and grows
+const appV2Proto = `
+syntax = "proto3";
+package apptest.v1;
+import "protogorm/v1/options.proto";
+option go_package = "example.test/gen/app/v1;appv1";
+
+message Player {
+  option (protogorm.v1.model) = {table: "players"};
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string name = 2 [(protogorm.v1.db) = {tag: "not null;uniqueIndex:idx_players_name"}];
+  int64 coins = 3 [(protogorm.v1.db) = {tag: "not null;default:0"}];
+  bool admin = 4 [(protogorm.v1.db) = {tag: "not null;default:false"}];
+  int64 level = 5 [(protogorm.v1.db) = {tag: "not null;default:1"}];
 }
 
-func (worldV1) TableName() string { return "worlds" }
-
-// Second release adds, renames, and grows a table
-type playerV2 struct {
-	ID    string `gorm:"primaryKey;column:id"`
-	Name  string `gorm:"column:name;not null;uniqueIndex:idx_players_name"`
-	Coins int64  `gorm:"column:coins;not null;default:0"`
-	Admin bool   `gorm:"column:admin;not null;default:false"`
-	Level int64  `gorm:"column:level;not null;default:1"`
+message World {
+  option (protogorm.v1.model) = {table: "worlds"};
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string name = 2 [(protogorm.v1.db) = {tag: "not null"}];
+  int64 world_seed = 3 [(protogorm.v1.db) = {was: ["seed"]}];
 }
 
-func (playerV2) TableName() string { return "players" }
+message Realm {
+  option (protogorm.v1.model) = {table: "realms"};
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string title = 2 [(protogorm.v1.db) = {tag: "not null"}];
+}
+`
 
-type worldV2 struct {
-	ID        string `gorm:"primaryKey;column:id"`
-	Name      string `gorm:"column:name;not null"`
-	WorldSeed int64  `gorm:"column:world_seed"`
+// Pre framework schema an intake migration transforms
+const legacyProto = `
+syntax = "proto3";
+package apptest.v1;
+import "protogorm/v1/options.proto";
+option go_package = "example.test/gen/app/v1;appv1";
+
+message Player {
+  option (protogorm.v1.model) = {table: "players"};
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string name = 2 [(protogorm.v1.db) = {tag: "not null;uniqueIndex:idx_players_name"}];
+  int64 gold = 3 [(protogorm.v1.db) = {tag: "not null;default:0"}];
 }
 
-func (worldV2) TableName() string { return "worlds" }
-
-type realmV2 struct {
-	ID    string `gorm:"primaryKey;column:id"`
-	Title string `gorm:"column:title;not null"`
+message World {
+  option (protogorm.v1.model) = {table: "worlds"};
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string name = 2 [(protogorm.v1.db) = {tag: "not null"}];
+  int64 seed = 3;
 }
+`
 
-func (realmV2) TableName() string { return "realms" }
+// Runs one proto source through the real spec pipeline
+func buildSpec(t *testing.T, src string) *migrate.Spec {
+	t.Helper()
+	img, err := testproto.Image("app/v1/app.proto", map[string]string{
+		"app/v1/app.proto": src,
+	})
+	if err != nil {
+		t.Fatalf("build image: %v", err)
+	}
+	files, err := generator.LoadImage(img)
+	if err != nil {
+		t.Fatalf("load image: %v", err)
+	}
+	models, err := generator.Collect(files)
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	spec, err := generator.BuildSpec(models, migrate.Dialects())
+	if err != nil {
+		t.Fatalf("spec: %v", err)
+	}
+	return spec
+}
 
 func openDB(t *testing.T, path string) *gorm.DB {
 	t.Helper()
@@ -65,21 +122,9 @@ func openDB(t *testing.T, path string) *gorm.DB {
 	return db
 }
 
-func specOf(t *testing.T, models ...any) *migrate.Spec {
-	t.Helper()
-	spec, err := migrate.SpecOf(migrate.SpecSource{
-		Models:     models,
-		Dialectors: []gorm.Dialector{sqlite.Open("file::memory:")},
-	})
-	if err != nil {
-		t.Fatalf("spec: %v", err)
-	}
-	return spec
-}
+func v1Spec(t *testing.T) *migrate.Spec { return buildSpec(t, appV1Proto) }
 
-func v1Spec(t *testing.T) *migrate.Spec { return specOf(t, &playerV1{}, &worldV1{}) }
-
-func v2Spec(t *testing.T) *migrate.Spec { return specOf(t, &playerV2{}, &worldV2{}, &realmV2{}) }
+func v2Spec(t *testing.T) *migrate.Spec { return buildSpec(t, appV2Proto) }
 
 // Chain holding just the genesis
 func v1Registry(t *testing.T) *migrate.Registry {
@@ -88,16 +133,13 @@ func v1Registry(t *testing.T) *migrate.Registry {
 }
 
 // Chain moving genesis onto the second release
+// The world_seed rename resolves from proto history alone
 func v2Registry(t *testing.T) *migrate.Registry {
 	t.Helper()
 	genesis := v1Spec(t)
 	target := v2Spec(t)
 	reg := &migrate.Registry{Genesis: genesis}
-	ops, demands, err := migrate.Diff(genesis, target, &migrate.Resolution{
-		Renames: map[string]map[string]string{
-			"worlds": {"world_seed": "seed"},
-		},
-	})
+	ops, demands, err := migrate.Diff(genesis, target, nil)
 	if err != nil {
 		t.Fatalf("diff: %v", err)
 	}
@@ -300,23 +342,6 @@ func TestHandBuiltGenesisResolvesByFingerprint(t *testing.T) {
 	}
 }
 
-// Pre framework shape the intake migration transforms
-type legacyPlayer struct {
-	ID   string `gorm:"primaryKey;column:id"`
-	Name string `gorm:"column:name;not null;uniqueIndex:idx_players_name"`
-	Gold int64  `gorm:"column:gold;not null;default:0"`
-}
-
-func (legacyPlayer) TableName() string { return "players" }
-
-type legacyWorld struct {
-	ID   string `gorm:"primaryKey;column:id"`
-	Name string `gorm:"column:name;not null"`
-	Seed int64  `gorm:"column:seed"`
-}
-
-func (legacyWorld) TableName() string { return "worlds" }
-
 func TestBaselineIntakeTransformsLegacy(t *testing.T) {
 	dir := t.TempDir()
 	db := openDB(t, filepath.Join(dir, "legacy.db"))
@@ -337,7 +362,7 @@ func TestBaselineIntakeTransformsLegacy(t *testing.T) {
 
 	// Intake migration written against the legacy shape
 	target := v2Spec(t)
-	reg := &migrate.Registry{Genesis: specOf(t, &legacyPlayer{}, &legacyWorld{})}
+	reg := &migrate.Registry{Genesis: buildSpec(t, legacyProto)}
 	reg.MustAdd(&migrate.Migration{
 		Ordinal: 1,
 		Name:    "legacy_intake",
@@ -441,9 +466,7 @@ func TestTransformRunsInsideMigration(t *testing.T) {
 	genesis := v1Spec(t)
 	target := v2Spec(t)
 	reg := &migrate.Registry{Genesis: genesis}
-	ops, _, err := migrate.Diff(genesis, target, &migrate.Resolution{
-		Renames: map[string]map[string]string{"worlds": {"world_seed": "seed"}},
-	})
+	ops, _, err := migrate.Diff(genesis, target, nil)
 	if err != nil {
 		t.Fatalf("diff: %v", err)
 	}
@@ -473,9 +496,7 @@ func TestFailedMigrationRollsBack(t *testing.T) {
 	genesis := v1Spec(t)
 	target := v2Spec(t)
 	reg := &migrate.Registry{Genesis: genesis}
-	ops, _, err := migrate.Diff(genesis, target, &migrate.Resolution{
-		Renames: map[string]map[string]string{"worlds": {"world_seed": "seed"}},
-	})
+	ops, _, err := migrate.Diff(genesis, target, nil)
 	if err != nil {
 		t.Fatalf("diff: %v", err)
 	}

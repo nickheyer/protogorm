@@ -17,6 +17,7 @@ message Model {
   repeated Cascade cascades = 5; // Children removed inside delete
   repeated Guard guards = 6; // References blocking delete
   bool upsert = 7; // Emit conflict safe upsert method
+  repeated string was = 8; // Former table names, newest first
 }
 
 // One generated query beyond the defaults
@@ -62,10 +63,12 @@ message Guard {
 // Column settings for one persisted field
 // Fields typed as another model become relations,
 // the foreign key defaults to the field name plus id
+// Reserved field names count as confirmed column drops
 message Field {
   string tag = 1; // Gorm tag fragments appended to the computed column
   bool skip = 2; // Runtime only field, never a column
   bool redact = 3; // Secret value, json dash and cleared by Redact
+  repeated string was = 4; // Former column names, newest first
 }
 
 extend google.protobuf.MessageOptions {

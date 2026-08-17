@@ -170,11 +170,23 @@ func (e *Engine) freshInstall(db *gorm.DB, d Dialect) error {
 				}
 			}
 		}
-		if err := tx.AutoMigrate(&ledgerRow{}); err != nil {
+		if err := ensureLedger(tx, d); err != nil {
 			return err
 		}
 		return e.stampThrough(tx, d, e.Registry.Len(), 0)
 	})
+}
+
+// Creates the ledger table through the dialect ddl
+func ensureLedger(tx *gorm.DB, d Dialect) error {
+	if tx.Migrator().HasTable(LedgerTable) {
+		return nil
+	}
+	sql, err := d.CreateTableSQL(ledgerSpec(d))
+	if err != nil {
+		return err
+	}
+	return tx.Exec(sql).Error
 }
 
 // Records chain rows up to and including ordinal
@@ -265,7 +277,7 @@ func (e *Engine) stampBaseline(db *gorm.DB, d Dialect, applied int) error {
 		return nil
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.AutoMigrate(&ledgerRow{}); err != nil {
+		if err := ensureLedger(tx, d); err != nil {
 			return err
 		}
 		return e.stampThrough(tx, d, applied, 0)

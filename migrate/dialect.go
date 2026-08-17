@@ -2,15 +2,47 @@ package migrate
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"gorm.io/gorm"
 )
 
+// Storage value classes shared by every dialect
+type LogicalType string
+
+const (
+	TypeText   LogicalType = "text"
+	TypeBool   LogicalType = "bool"
+	TypeInt32  LogicalType = "int32"
+	TypeInt64  LogicalType = "int64"
+	TypeUint32 LogicalType = "uint32"
+	TypeUint64 LogicalType = "uint64"
+	TypeFloat  LogicalType = "float"
+	TypeDouble LogicalType = "double"
+	TypeBytes  LogicalType = "bytes"
+	TypeTime   LogicalType = "time"
+	TypeJSON   LogicalType = "json"
+	TypeEnum   LogicalType = "enum"
+)
+
+// Logical column shape dialects render types from
+type LogicalColumn struct {
+	Kind LogicalType
+	// Bit or character width when a tag sets one
+	Size      int
+	Precision int
+	Scale     int
+	AutoInc   bool
+	PK        bool
+}
+
 // Engine specific behavior one backend needs
 type Dialect interface {
 	// Matches gorm dialector names
 	Name() string
+	// Column type spelling for one logical shape
+	TypeOf(c LogicalColumn) string
 	// Folds type spellings the engine treats alike
 	NormalizeType(typ string) string
 	// Whether ddl rolls back inside a transaction
@@ -66,6 +98,20 @@ func DialectByName(name string) (Dialect, error) {
 		return d, nil
 	}
 	return nil, fmt.Errorf("no migrate dialect registered for %s", name)
+}
+
+// Every registered dialect sorted by name
+func Dialects() []Dialect {
+	names := make([]string, 0, len(dialects))
+	for name := range dialects {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]Dialect, 0, len(names))
+	for _, name := range names {
+		out = append(out, dialects[name])
+	}
+	return out
 }
 
 // Renders one column clause shared by create paths

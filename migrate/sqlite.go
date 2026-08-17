@@ -18,6 +18,23 @@ type sqliteDialect struct{}
 
 func (sqliteDialect) Name() string { return "sqlite" }
 
+// Mirrors the gorm sqlite driver type spellings
+func (sqliteDialect) TypeOf(c LogicalColumn) string {
+	switch c.Kind {
+	case TypeBool:
+		return "numeric"
+	case TypeInt32, TypeInt64, TypeUint32, TypeUint64, TypeEnum:
+		return "integer"
+	case TypeFloat, TypeDouble:
+		return "real"
+	case TypeBytes:
+		return "blob"
+	case TypeTime:
+		return "datetime"
+	}
+	return "text"
+}
+
 // Sqlite ddl is fully transactional
 func (sqliteDialect) TransactionalDDL() bool { return true }
 
@@ -177,6 +194,10 @@ func renderCreateIndex(d Dialect, table string, idx *IndexSpec) string {
 	for i, c := range idx.Columns {
 		cols[i] = d.Quote(c)
 	}
-	return fmt.Sprintf("CREATE %sINDEX %s ON %s (%s)",
+	sql := fmt.Sprintf("CREATE %sINDEX %s ON %s (%s)",
 		unique, d.Quote(idx.Name), d.Quote(table), strings.Join(cols, ", "))
+	if idx.Where != "" {
+		sql += " WHERE " + idx.Where
+	}
+	return sql
 }

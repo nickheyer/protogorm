@@ -125,7 +125,7 @@ func parseDBTime(s string) (time.Time, error) {
 		}
 	}
 
-	b.WriteString("// Every table for automigrate\nfunc AllModels() []any {\n\treturn []any{\n")
+	b.WriteString("// Every table in one slice\nfunc AllModels() []any {\n\treturn []any{\n")
 	for _, m := range models {
 		fmt.Fprintf(&b, "\t\t&%s{},\n", m.Name)
 	}

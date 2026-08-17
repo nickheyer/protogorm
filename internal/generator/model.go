@@ -20,6 +20,13 @@ type Package struct {
 	Dir        string
 }
 
+// One parsed gorm tag setting
+type TagSetting struct {
+	// Uppercased key matching gorm's own parser
+	Key   string
+	Value string
+}
+
 // One persisted column or relation
 type Field struct {
 	GoName     string
@@ -35,6 +42,8 @@ type Field struct {
 	PK         bool
 	AutoInc    bool
 	Tag        string
+	Settings   []TagSetting
+	Was        []string
 }
 
 // One table backed message
@@ -143,30 +152,46 @@ func buildField(fd protoreflect.FieldDescriptor, isModel map[protoreflect.FullNa
 		fs.Skip = ext.Skip
 		fs.Redact = ext.Redact
 		fs.Tag = ext.Tag
+		fs.Was = ext.Was
 	}
 	if fd.Kind() == protoreflect.MessageKind && !fd.IsMap() && !fd.IsList() && isModel[fd.Message().FullName()] {
 		fs.Relation = true
 		return fs
 	}
 	if ext != nil {
-		for _, part := range strings.Split(ext.Tag, ";") {
-			switch {
-			case strings.HasPrefix(part, "column:"):
-				fs.Column = strings.TrimPrefix(part, "column:")
-			case part == "autoCreateTime":
+		fs.Settings = parseTagSettings(ext.Tag)
+		for _, s := range fs.Settings {
+			switch s.Key {
+			case "COLUMN":
+				fs.Column = s.Value
+			case "AUTOCREATETIME":
 				fs.AutoCreate = true
-			case part == "autoUpdateTime":
+			case "AUTOUPDATETIME":
 				fs.AutoUpdate = true
+			case "PRIMARYKEY", "PRIMARY_KEY":
+				fs.PK = true
+			case "AUTOINCREMENT":
+				fs.AutoInc = true
 			}
-		}
-		if strings.Contains(ext.Tag, "primaryKey") {
-			fs.PK = true
-		}
-		if strings.Contains(ext.Tag, "autoIncrement") {
-			fs.AutoInc = true
 		}
 	}
 	return fs
+}
+
+// Splits tag fragments the way gorm's parser does
+func parseTagSettings(tag string) []TagSetting {
+	var out []TagSetting
+	for _, part := range strings.Split(tag, ";") {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		key, value, _ := strings.Cut(part, ":")
+		out = append(out, TagSetting{
+			Key:   strings.ToUpper(strings.TrimSpace(key)),
+			Value: value,
+		})
+	}
+	return out
 }
 
 // Groups models by go package preserving collect order
