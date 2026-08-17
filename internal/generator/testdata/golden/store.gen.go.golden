@@ -99,7 +99,7 @@ func (s *Store) UpsertAuthor(ctx context.Context, row *testv1.Author) error {
 	}
 	return s.db.WithContext(ctx).Omit(clause.Associations).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"email", "name", "api_key", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"email", "name", "api_key", "updated_at", "handle"}),
 	}).Create(row).Error
 }
 

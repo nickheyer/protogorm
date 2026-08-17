@@ -66,6 +66,9 @@ Support and store generation also work as a plain protoc plugin for setups that 
   - local: protoc-gen-protogorm
     out: internal/db
     opt: [store=db]
+  - local: protoc-gen-protogorm
+    out: internal/db/migrations
+    opt: [spec=head.snapshot.json]
 ```
 
 Injection still runs after, via `protogorm -inject`.
@@ -105,7 +108,9 @@ buf build -o - | go run github.com/nickheyer/protogorm/cmd/protogorm \
     -scaffold add_lobby_flags
 ```
 
-Run `-spec` inside your normal gen step so the head snapshot always matches the protos. Run `-scaffold` when you change the schema; anything it cannot resolve from proto history it asks for through a `-resolve` json file. Fresh installs never replay the chain, the engine creates every table at head in one step and stamps the ledger.
+Run `-spec` inside your normal gen step so the head snapshot always matches the protos.
+Run `-scaffold` when you change the schema, anything it cannot resolve from proto history it asks for through a `-resolve` json file.
+Fresh installs never replay the chain, the engine creates every table at head in one step and stamps the ledger.
 
 ## Testing
 
